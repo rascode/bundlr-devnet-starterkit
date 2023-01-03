@@ -10,7 +10,8 @@
   "license": "ISC",
   "dependencies": {
     "@bundlr-network/client": "^0.9.11",
-    "dotenv": "^16.0.3"
+    "dotenv": "^16.0.3",
+    "path": "^0.12.7"
   },
   "type": "module"
 }
