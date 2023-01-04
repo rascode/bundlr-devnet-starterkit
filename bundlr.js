@@ -1,48 +1,11 @@
 import Bundlr from "@bundlr-network/client";
-import { stat, statSync } from "fs";
+import { statSync } from "fs";
 import path from 'path';
+import config from './bundlr.config.js';
 
-import * as dotenv from 'dotenv' // see https://github.com/motdotla/dotenv#how-do-i-use-dotenv-with-import
-dotenv.config()
-
-//global configuration object
-const config = {
-    app:{
-        name: "Bundlr Demo",
-        version: "0.1.1",
-        contentType: "text/html"
-    },
-    env:{
-        dev:{
-            gateway: "https://devnet.bundlr.network",
-            currency: "matic",
-            rpc: "https://rpc-mumbai.maticvigil.com"
-        },
-        prod:
-        {
-            gateway: "https://arweave.net",
-            currency: "matic",
-            rpc: "matic-rpc.com"
-
-        }
-    },
-    currency: "matic",
-    rpc: "https://rpc-mumbai.maticvigil.com/",
-    key: process.env.WALLET_KEY,
-    default:{
-        payload: "hello mastermind",
-        file:{
-            path:"./src/assets/demo-file.jpeg",
-        },
-        folderPath: "./src",
-        fund:{
-            amount: 4_444_424
-        }
-    }
-}
 
 async function getFileSize(filePath){
-    const pathToFile = filePath ? filePath : config.default.file.path
+    const pathToFile = filePath ? filePath : config.file.path
     const {size} = statSync(pathToFile)
     return size
 }
@@ -55,7 +18,7 @@ async function getUploadPrice(uploadSize){
 }
 
 // Connect to a Bundlr Node
-const bundlr = new Bundlr.default(config.env.dev.gateway, config.env.dev.currency, config.key, { providerUrl: config.env.dev.rpc});
+const bundlr = new Bundlr.default(config.env.dev.gateway, config.env.dev.currency, config.wallet.key, { providerUrl: config.env.dev.rpc});
 await bundlr.ready()
 
 console.log(`Your Bundlr node is funded by the following wallet address: ${bundlr.address} \n`);
@@ -64,20 +27,16 @@ console.log(`Your Bundlr node is funded by the following wallet address: ${bundl
 // Get the Balance of your Bundlr node
 async function getNodeBalance(){
     let atomicBalance = await bundlr.getLoadedBalance();
-    //console.log(`The native node currency balance is ${atomicBalance}`)
     let convertedAtomicBalance = await bundlr.utils.unitConverter(atomicBalance)
     console.log(`Your bundlr node has a current balance of ${convertedAtomicBalance} ${config.currency}`)
 }
 
 // Get Cost estimate in the same currenc
 async function getUploadCostEstimate(filePath){
-    // If no value is passed into this function, we default to checking the price to upload 1MB of data
-    // The function accepts a number of bytes, so to check the price of 1MB, check the price of 1,048,576 bytes.
-
-    const size = await getFileSize(filePath ? filePath : config.default.file.path)
+    const size = await getFileSize(filePath ? filePath : config.file.path)
     const {atomicPrice, convertedPrice} = await getUploadPrice(size)
     
-    console.log(`It will run you about ${convertedPrice} to upload ${size} bytes of data. \n`)
+    console.log(`It will cost you about ${convertedPrice} to upload ${size} bytes of data. \n`)
     return atomicPrice
 }
 
@@ -95,10 +54,11 @@ async function fundBundlrNode(filePath) {
 
 // Upload any arbitraty data
 async function uploadData(payload){
-    const data = payload ? payload : config.default.payload
+    const data = payload ? payload : JSON.stringify(config.default.data.payload)
+    const tags = [{name: "Content-Type", value: "application/json"}]
     try {
-        let response = await bundlr.upload(data)
-        console.log(`Successfully upload payload :: ${data} :: to ${config.gateway.main}/${response.id}`)
+        let tx = await bundlr.upload(data, {tags: tags})
+        console.log(`Successfully upload payload :: ${data} :: to ${config.env.prod.gateway}/${tx.id}`)
     } catch (error) {
         console.log("The following mistakes were made:", error)
     }
@@ -106,42 +66,50 @@ async function uploadData(payload){
 
 async function uploadFile(fileName, contentType, appName){
     
-    const asset = fileName ? fileName : config.default.file.path
-    const content = contentType ? contentType : config.default.file.type
-    const app = appName ? appName : config.app.name
-    const type = path.extname(config.default.file.path)
-    const tags = [
-        { name: "Content-Type", value: type },
-        { name: "appName", value: config.app.name}
-    ]
+    const file = fileName ? fileName : config.file.path
 
+    const tags = [
+        { name: "App-Name", value: appName ? appName : config.app.name },
+        { name: "App-Version", value: config.app.version},
+        { name: "Content-Type", value: path.extname(file)},
+        { name: "Title", value: config.file.title},
+        { name: "Description", value: config.file.description}
+    ]
     // check upload fees against wallet balance.  Add funds to wallet to conver upload tx
-    if(getUploadCostEstimate(asset) < getNodeBalance){
+    if(getUploadCostEstimate(file) < getNodeBalance){
         console.log("Need more cash. Executing Fund command... \n")
-        await fundBundlrNode(fileName)
+        await fundBundlrNode(file)
         console.log("Node now funded for transaction. Initiating Upload now... \n")
-    }else {console.log ("funding good")}
+    }else {console.log ("funding ok")}
     
     try {
-        const tx = await bundlr.uploadFile(asset, {
-            tags: tags
-        })
+        const tx = await bundlr.uploadFile(file,{ tags:tags } )
         console.log(`File uploaded to ${config.env.prod.gateway}/${tx.id}`)
     } catch (error) {
         console.log("The following mistakes were made:", error)
     }
 }
 
-// docs: https://docs.bundlr.network/docs/sdk/Basic%20Features/uploading-folder
 async function uploadFolder(folderPath){
-    const folder = folderPath ? folderPath : config.default.folderPath
+    const payload = folderPath ? folderPath : config.folder.path
+
+    const tags = [
+        { name: "App-Name", value: config.app.name},
+        { name: "App-Version", value: config.app.version},
+        { name: "Title", value: config.folder.title},
+        { name: "Description", value: config.folder.description},
+    ]
+
     try {
-        let response = await bundlr.uploadFolder(folder, {
+        let tx = await bundlr.uploadFolder(payload, {
             indexFile: './index.html', //optional index file (file the user will load when accessing the manifest)
             batchSize: 50, // max number of items to upload at once
-            keepDeleted: false // whether to keep now deleted items from previous uploads
-        }); // returns the manifest ID
-        console.log(`Files uploaded. Manifest Id ${response.id} and you can view your files here: ${config.gateway.main}/${response.id}`);
+            keepDeleted: false, // whether to keep now deleted items from previous uploads
+            tags: tags // folder tags
+        }) // returns the manifest ID
+        console.log(`Folder uploaded successfully with Manifest Id: ${tx.id}.  You can view your folder here${config.env.prod.gateway}/${tx.id}`)
+        //todo: determine how to automatically load the index.html file from the root path of the manifest file.
+
     } catch (error) {
         console.log(`Mistakes were made: `, error)
     }
@@ -151,7 +119,7 @@ async function uploadFolder(folderPath){
 // await getNodeBalance()
 // await getUploadCostEstimate()
 // await fundBundlrNode()
-// await uploadData()
-await uploadFile()
-// await uploadFolder()
+//await uploadData()
+//await uploadFile()
+ await uploadFolder()
 
