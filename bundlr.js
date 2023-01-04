@@ -2,6 +2,7 @@ import Bundlr from "@bundlr-network/client";
 import { statSync } from "fs";
 import path from 'path';
 import config from './bundlr.config.js';
+import getFolderSize from 'get-folder-size';
 
 
 async function getFileSize(filePath){
@@ -10,11 +11,11 @@ async function getFileSize(filePath){
     return size
 }
 
-async function getUploadPrice(uploadSize){
+async function getUploadFee(uploadSize){
     const size = uploadSize ? uploadSize : config.default.dataSize
-    const atomicPrice = await bundlr.getPrice(size)
-    const convertedPrice = bundlr.utils.unitConverter(atomicPrice)
-    return {atomicPrice, convertedPrice}
+    const atomicUploadFee = await bundlr.getPrice(size)
+    const convertedUploadFee = bundlr.utils.unitConverter(atomicUploadFee)
+    return {atomicUploadFee, convertedUploadFee}
 }
 
 // Connect to a Bundlr Node
@@ -26,72 +27,78 @@ console.log(`Your Bundlr node is funded by the following wallet address: ${bundl
 
 // Get the Balance of your Bundlr node
 async function getNodeBalance(){
-    let atomicBalance = await bundlr.getLoadedBalance();
-    let convertedAtomicBalance = await bundlr.utils.unitConverter(atomicBalance)
-    console.log(`Your bundlr node has a current balance of ${convertedAtomicBalance} ${config.currency}`)
-}
-
-// Get Cost estimate in the same currenc
-async function getUploadCostEstimate(filePath){
-    const size = await getFileSize(filePath ? filePath : config.file.path)
-    const {atomicPrice, convertedPrice} = await getUploadPrice(size)
-    
-    console.log(`It will cost you about ${convertedPrice} to upload ${size} bytes of data. \n`)
-    return atomicPrice
+    let atomicNodeBalance = await bundlr.getLoadedBalance();
+    let convertedAtomicBalance = await bundlr.utils.unitConverter(atomicNodeBalance)
+    console.log(`Your bundlr node has a current balance of ${convertedAtomicBalance} ${config.env.dev.currency}`)
+    return atomicNodeBalance
 }
 
 // Add currency to Bundlr Node
-async function fundBundlrNode(filePath) {
-    const size = await getFileSize()
-    const {atomicPrice, convertedPrice} = await getUploadPrice(size)
+async function fundBundlrNode(size) {
+    const {atomicUploadFee, convertedUploadFee} = await getUploadFee(size)
     try {
-        let response = await bundlr.fund(atomicPrice)
-        console.log(`Successfully funded ${convertedPrice} ${config.currency} to Bundlr node with transaction id:${response.id}`)
+        let tx = await bundlr.fund(atomicUploadFee)
+        console.log(`Successfully added ${convertedUploadFee} ${config.currency} to Bundlr node. View on blockexplorer: http://myblock/${tx.id}`)
+        return convertedUploadFee
     } catch (error) {
         console.log('Mistakes were made', error)
     }
 }
 
-// Upload any arbitraty data
-async function uploadData(payload){
-    const data = payload ? payload : JSON.stringify(config.default.data.payload)
-    const tags = [{name: "Content-Type", value: "application/json"}]
+async function uploadToPermaweb(payload){
     try {
-        let tx = await bundlr.upload(data, {tags: tags})
-        console.log(`Successfully upload payload :: ${data} :: to ${config.env.prod.gateway}/${tx.id}`)
-    } catch (error) {
-        console.log("The following mistakes were made:", error)
+        let tx = await bundlr.upload(payload);
+        console.log(`Data uploaded ==> https://arweave.net/${tx.id}`);
+        return tx.id
+    } catch (e) {
+        console.log("Error uploading file ", e);
     }
 }
 
-async function uploadFile(fileName, contentType, appName){
-    
-    const file = fileName ? fileName : config.file.path
+// Upload any arbitraty data
+async function uploadPayload(payload){
+    const data = payload ? payload : JSON.stringify(config.data.payload)
+    const tags = [{name: "Content-Type", value: "application/json"}]
+    uploadToPermaweb(data, tags);
+}
 
+async function uploadFile(filePath){
+    
+    const file = filePath ? filePath : config.file.path
+    const fileSize = await getFileSize(file)
+    const { atomicUploadFee } = await getUploadFee(fileSize)
+    const atomicNodeBalance = await getNodeBalance() 
     const tags = [
-        { name: "App-Name", value: appName ? appName : config.app.name },
+        { name: "App-Name", value: config.app.name },
         { name: "App-Version", value: config.app.version},
         { name: "Content-Type", value: path.extname(file)},
         { name: "Title", value: config.file.title},
         { name: "Description", value: config.file.description}
     ]
-    // check upload fees against wallet balance.  Add funds to wallet to conver upload tx
-    if(getUploadCostEstimate(file) < getNodeBalance){
-        console.log("Need more cash. Executing Fund command... \n")
-        await fundBundlrNode(file)
-        console.log("Node now funded for transaction. Initiating Upload now... \n")
-    }else {console.log ("funding ok")}
     
-    try {
-        const tx = await bundlr.uploadFile(file,{ tags:tags } )
-        console.log(`File uploaded to ${config.env.prod.gateway}/${tx.id}`)
-    } catch (error) {
-        console.log("The following mistakes were made:", error)
+    if(atomicUploadFee < atomicNodeBalance){
+        console.log("Need more cash. Executing Fund command... \n")
+        await fundBundlrNode(fileSize)
+        console.log("Node now funded for transaction. Initiating Upload now... \n")
+    } else {
+        console.log ("Funding ok. Proceeding to upload folder to permaweb \n")
     }
+
+    try {
+        let tx = await bundlr.uploadFile(file, {tags: tags});
+        console.log(`Your file has been uploaded to the permaweb ==> https://arweave.net/${tx.id}`);
+
+    } catch (e) {
+        console.log("Error uploading file ", e);
+    }
+    
 }
 
 async function uploadFolder(folderPath){
-    const payload = folderPath ? folderPath : config.folder.path
+    const folder = folderPath ? folderPath : config.folder.path
+    const folderSize = await getFolderSize.loose(folder);
+    const uploadCost = await getUploadCostEstimate(folderSize)
+    const nodeBalance = await getNodeBalance()
 
     const tags = [
         { name: "App-Name", value: config.app.name},
@@ -100,14 +107,20 @@ async function uploadFolder(folderPath){
         { name: "Description", value: config.folder.description},
     ]
 
+    if (uploadCost > nodeBalance) {
+        console.log (`Bundlr Node balance insufficient to cover upload.  Funding node from wallet ${bundlr.address} \n`)
+        const fundAmount = await fundBundlrNode(folderSize)
+        console.log(`Funded Bundlr node with ${fundAmount} ${config.env.currency}. Uploading folder to permaweb now...`)
+    }
+
     try {
-        let tx = await bundlr.uploadFolder(payload, {
-            indexFile: './index.html', //optional index file (file the user will load when accessing the manifest)
+        let tx = await bundlr.uploadFolder(folder, {
+            //indexFile: './index.html', //optional index file (file the user will load when accessing the manifest)
             batchSize: 50, // max number of items to upload at once
             keepDeleted: false, // whether to keep now deleted items from previous uploads
             tags: tags // folder tags
         }) // returns the manifest ID
-        console.log(`Folder uploaded successfully with Manifest Id: ${tx.id}.  You can view your folder here${config.env.prod.gateway}/${tx.id}`)
+        console.log(`Folder successfully uploaded to permaweb with Manifest Id: ${tx.id}.  You can view your folder here ${config.env.prod.gateway}/${tx.id}`)
         //todo: determine how to automatically load the index.html file from the root path of the manifest file.
 
     } catch (error) {
@@ -118,8 +131,7 @@ async function uploadFolder(folderPath){
 // await getFileSize()
 // await getNodeBalance()
 // await getUploadCostEstimate()
-// await fundBundlrNode()
-//await uploadData()
-//await uploadFile()
- await uploadFolder()
-
+//await fundBundlrNode()
+//await uploadPayload()
+await uploadFile()
+//await uploadFolder()

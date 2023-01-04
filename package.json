@@ -11,6 +11,7 @@
   "dependencies": {
     "@bundlr-network/client": "^0.9.11",
     "dotenv": "^16.0.3",
+    "get-folder-size": "^4.0.0",
     "path": "^0.12.7"
   },
   "type": "module"
