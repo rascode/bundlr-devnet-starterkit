@@ -13,3 +13,11 @@ Fair warning, I've taken a rather opinionated approach to structuring the code, 
 1. Rename the .env.sample file to .env
 2. Replace the Wallet key with the private key of your wallet of choice
 3. (Optional) If you would like to use another network other than Polygon(e.g. Near, Solana, etc.), simply replace the global settings in the bundlr.config.js file and you'll be up and running with your network of choice.
+
+## Functions
+
+### Upload Data to the Test Arweave Permaweb via Bundlr Development Network Node
+
+### Upload a Single File to the Test Arweave Permaweb via a Bundlr Development Network Node
+
+### Upload a Folder to the Test Arweave Permaweb via the a Bundler Development Network Node
