@@ -68,8 +68,19 @@ async function executeFileUploadToPermaweb(file, tags){
 }
 
 // Perform folder upload to permaweb via Bundlr node
-async function executeFolderUploadToPermaweb(){
+async function executeFolderUploadToPermaweb(folder, tags){
+    try {
+        let tx = await bundlr.uploadFolder(folder, {
+            //indexFile: './index.html', //optional index file (file the user will load when accessing the manifest)
+            batchSize: 50, // max number of items to upload at once
+            keepDeleted: false, // whether to keep now deleted items from previous uploads
+            tags: tags // folder tags
+        }) // returns the manifest ID
+        console.log(`Folder successfully uploaded to permaweb with Manifest Id: ${tx.id}.  You can view your folder here ${config.env.prod.gateway}/${tx.id}`)
 
+    } catch (error) {
+        console.log(`Mistakes were made: `, error)
+    }
 }
 
 
@@ -117,7 +128,7 @@ async function uploadFolder(folderPath){
     //declare variables
     const folder = folderPath ? folderPath : config.folder.path
     const folderSize = await getFolderSize.loose(folder);
-    const uploadCost = await getUploadCostEstimate(folderSize)
+    const { atomicUploadFee } = await getUploadFee(folderSize)
     const nodeBalance = await getNodeBalance()
     
     //define permaweb tags
@@ -129,31 +140,20 @@ async function uploadFolder(folderPath){
     ]
 
     //compare upload fee to balance. Add to balance if node insufficiently funded for transaction
-    if (uploadCost > nodeBalance) {
+    if (atomicUploadFee > nodeBalance) {
         console.log (`Bundlr Node balance insufficient to cover upload.  Funding node from wallet ${bundlr.address} \n`)
         const fundAmount = await fundBundlrNode(folderSize)
         console.log(`Funded Bundlr node with ${fundAmount} ${config.env.currency}. Uploading folder to permaweb now...`)
     }
 
-    try {
-        let tx = await bundlr.uploadFolder(folder, {
-            //indexFile: './index.html', //optional index file (file the user will load when accessing the manifest)
-            batchSize: 50, // max number of items to upload at once
-            keepDeleted: false, // whether to keep now deleted items from previous uploads
-            tags: tags // folder tags
-        }) // returns the manifest ID
-        console.log(`Folder successfully uploaded to permaweb with Manifest Id: ${tx.id}.  You can view your folder here ${config.env.prod.gateway}/${tx.id}`)
-        //todo: determine how to automatically load the index.html file from the root path of the manifest file.
-
-    } catch (error) {
-        console.log(`Mistakes were made: `, error)
-    }
+    executeFolderUploadToPermaweb(folder, tags)
+   
 }
 
 // await getFileSize()
 // await getNodeBalance()
 // await getUploadCostEstimate()
 //await fundBundlrNode()
-await uploadData()
+//await uploadData()
 //await uploadFile()
-//await uploadFolder()
+await uploadFolder()
