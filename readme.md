@@ -12,4 +12,4 @@ Fair warning, I've taken a rather opinionated approach to structuring the code, 
 
 1. Rename the .env.sample file to .env
 2. Replace the Wallet key with the private key of your wallet of choice
-3. (Optional) If you would like to use another network other than Polygon, simply replace the global configuration settings and you'll be up and running with a new testnet.
+3. (Optional) If you would like to use another network other than Polygon(e.g. Near, Solana, etc.), simply replace the global settings in the bundlr.config.js file and you'll be up and running with your network of choice.
