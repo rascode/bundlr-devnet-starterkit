@@ -4,59 +4,75 @@ import path from 'path';
 import config from './bundlr.config.js';
 import getFolderSize from 'get-folder-size';
 
-// set execution mode variables
+
+// global configuration variables
+const appName = config.app.name
+const appVersion = config.app.version
+const dataTitle = config.data.title
+const dataDescription = config.data.description
+const fileTitle = config.file.title
+const fileDescription = config.file.description
+const folderTitle = config.folder.title
+const folderDescription = config.folder.description
+const fundAmount = config.fund.amount
+
 if (process.env.NODE_ENV === 'dev') {
-    const wallet_key = config.wallet.key
+    const walletKey = config.wallet.key
     const gateway = config.env.dev.permaweb.gateway
     const permaweb = config.env.dev.permaweb.url
     const currency = config.env.dev.net.currency
     const rpc = config.env.dev.net.rpc
     const blockExplorer = config.env.dev.net.explorer
 
-    // declar async getFileSize function
-    async function getFileSize(filePath) {
-        const pathToFile = filePath ? filePath : config.file.path
-        const { size } = statSync(pathToFile)
-        return size
-    }
-
     // declar async getUploadSize function
-    async function getUploadFee(uploadSize) {
-        const size = uploadSize ? uploadSize : config.default.dataSize
-        const atomicUploadFee = await bundlr.getPrice(size)
-        const convertedUploadFee = bundlr.utils.unitConverter(atomicUploadFee)
-        return { atomicUploadFee, convertedUploadFee }
+    async function getUploadFee(size) {
+        return await bundlr.getPrice(size)
     }
 
     // Connect to a Bundlr Node
-    const bundlr = new Bundlr.default(gateway, currency, wallet_key, { providerUrl: rpc });
+    const bundlr = new Bundlr.default(gateway, currency, walletKey, { providerUrl: rpc });
     await bundlr.ready()
-
-    console.log(`Your Bundlr node is funded by the following wallet address: ${bundlr.address} \n`);
-
-
-    // Get Bundlr node balance
-    async function getNodeBalance() {
-        let atomicNodeBalance = await bundlr.getLoadedBalance();
-        let convertedAtomicBalance = await bundlr.utils.unitConverter(atomicNodeBalance)
-        console.log(`Your bundlr node has a current balance of ${convertedAtomicBalance} ${currency}`)
-        return { atomicNodeBalance, convertedAtomicBalance }
-    }
+    let nodeBalance = await bundlr.getLoadedBalance()
+    const convertedNodeBalance = bundlr.utils.unitConverter(nodeBalance)
+    console.log(`Your Bundlr Node has a current balance of ${nodeBalance} ${currency} and is funded by wallet address: ${bundlr.address} \n`);
 
     // Fund Bundlr node
-    async function fundBundlrNode(size) {
-        const { atomicUploadFee, convertedUploadFee } = await getUploadFee(size)
+    async function fundBundlrNode(atomicAmount) {
+        if (!atomicAmount) {
+            console.log("Fund amount required")
+            return
+        }
+        const convertedAmount = await bundlr.utils.unitConverter(atomicAmount)
         try {
-            const { id } = await bundlr.fund(atomicUploadFee)
-            console.log(`Successfully added ${convertedUploadFee} ${config.currency} to Bundlr node. View on blockexplorer: ${blockExplorer}/${id}`)
-            return convertedUploadFee
+            const { id } = await bundlr.fund(atomicAmount)
+            let balance = await bundlr.getLoadedBalance()
+            let convertedBalance = await bundlr.utils.unitConverter(balance)
+            console.log(`Successfully added ${convertedAmount} ${currency} to Bundlr node which has a current balance of ${convertedBalance} . View on blockexplorer: ${blockExplorer}/${id}`)
+            return id
         } catch (error) {
             console.log('Mistakes were made', error)
         }
     }
 
+    async function uploadReadinessCheck(size) {
+        const uploadFee = await bundlr.getPrice(size)
+        const convertedFee = await bundlr.utils.unitConverter(uploadFee)
+
+        //compare upload fee to balance. Add to balance if node insufficiently funded for transaction
+        // todo: determine why this evaluation is inverted
+        if (uploadFee < nodeBalance) {
+            console.log(`It will cost ~ ${convertedFee} ${currency} to upload ${size} bytes of data to the permaweb; however your Bundlr Node has a current balance of ${convertedNodeBalance} ${currency}. Now adding ${convertedFee} ${currency} to your Bundlr Node to cover transaction fees... \n`)
+            await fundBundlrNode(uploadFee)
+            console.log("Your Bundlr Node is now sufficiently funded for transaction. Executing upload to permaweb now... \n")
+        } else {
+            console.log(`Fee is ${uploadFee} and Balance is ${nodeBalance}. Funding in order. Executing to permaweb now... \n`)
+        }
+    }
+
     //perform data upload to permaweb via Bundlr node
-    async function executeDataUploadToPermaweb(payload, tags) {
+    async function executeDataUploadToPermaweb(payload, size, tags) {
+        await uploadReadinessCheck(size)
+
         try {
             const { id } = await bundlr.upload(payload, { tags: tags });
             console.log(`Your data been uploaded to the permaweb ==> ${permaweb}/${id}`);
@@ -67,20 +83,23 @@ if (process.env.NODE_ENV === 'dev') {
     }
 
     //Perform file upload to permaweb via Bundlr node
-    async function executeFileUploadToPermaweb(file, tags) {
+    async function executeFileUploadToPermaweb(path, size, tags) {
+        await uploadReadinessCheck(size)
         try {
-            const { id } = await bundlr.uploadFile(file, { tags: tags });
-            console.log(`Your file has been uploaded to the permaweb ==> ${permaweb}/${id}`);
+            const { id } = await bundlr.uploadFile(path, { tags: tags });
+            console.log(`Your file has been uploaded to the permaweb and can be viewed here ==> ${permaweb}/${id}`);
             return id
         } catch (e) {
             console.log("Error uploading file ", e);
         }
     }
 
+
     // Perform folder upload to permaweb via Bundlr node
-    async function executeFolderUploadToPermaweb(folder, tags) {
+    async function executeFolderUploadToPermaweb(path, size, tags) {
+        await uploadReadinessCheck(size)
         try {
-            let { id } = await bundlr.uploadFolder(folder, {
+            let { id } = await bundlr.uploadFolder(path, {
                 //indexFile: './index.html', //optional index file (file the user will load when accessing the manifest)
                 batchSize: 50, // max number of items to upload at once
                 keepDeleted: false, // whether to keep now deleted items from previous uploads
@@ -96,74 +115,48 @@ if (process.env.NODE_ENV === 'dev') {
     // Upload any arbitraty data
     async function uploadData(payload) {
         const data = payload ? payload : JSON.stringify(config.data.payload)
-        const tags = [{ name: "Content-Type", value: "application/json" }]
-        executeDataUploadToPermaweb(data, tags);
+        const size = Object.keys(config.data.payload).length
+
+        const tags = [
+            { name: "Content-Type", value: "application/json" },
+            { name: "Title", value: dataTitle },
+            { name: "Description", value: dataDescription }
+        ]
+        await executeDataUploadToPermaweb(data, size, tags)
+
     }
 
     async function uploadFile(filePath) {
-
-        //declare variables
         const file = filePath ? filePath : config.file.path
-        const fileSize = await getFileSize(file)
-        const { atomicUploadFee } = await getUploadFee(fileSize)
-        const { atomicNodeBalance } = await getNodeBalance()
-
-        //define permaweb tags
+        const { size } = statSync(file)
+        const contentType = path.extname(file)
         const tags = [
-            { name: "App-Name", value: config.app.name },
-            { name: "App-Version", value: config.app.version },
-            { name: "Content-Type", value: path.extname(file) },
-            { name: "Title", value: config.file.title },
-            { name: "Description", value: config.file.description }
+            { name: "App-Name", value: appName },
+            { name: "App-Version", value: appVersion },
+            { name: "Content-Type", value: `image/${contentType}` },
+            { name: "Title", value: fileTitle },
+            { name: "Description", value: fileDescription }
         ]
-
-        //compare upload fee to balance. Add to balance if node insufficiently funded for transaction
-        if (atomicUploadFee > atomicNodeBalance) {
-            console.log("Need more cash. Executing Fund command... \n")
-            await fundBundlrNode(fileSize)
-            console.log("Node now funded for transaction. Initiating Upload now... \n")
-        } else {
-            console.log("Funding ok. Proceeding to upload folder to permaweb \n")
-        }
-
-        //perform file upload to permaweb
-        await executeFileUploadToPermaweb(file, tags)
-
+        await executeFileUploadToPermaweb(file, size, tags)
     }
 
     async function uploadFolder(folderPath) {
-
-        //declare variables
-        const folder = folderPath ? folderPath : config.folder.path
-        const folderSize = await getFolderSize.loose(folder);
-        const { atomicUploadFee } = await getUploadFee(folderSize)
-        const nodeBalance = await getNodeBalance()
-
-        //define permaweb tags
+        const path = folderPath ? folderPath : config.folder.path
+        const size = await getFolderSize.loose(path);
         const tags = [
-            { name: "App-Name", value: config.app.name },
-            { name: "App-Version", value: config.app.version },
-            { name: "Title", value: config.folder.title },
-            { name: "Description", value: config.folder.description },
+            { name: "App-Name", value: appName },
+            { name: "App-Version", value: appVersion },
+            { name: "Title", value: folderTitle },
+            { name: "Description", value: folderDescription },
         ]
-
-        //compare upload fee to balance. Add to balance if node insufficiently funded for transaction
-        if (atomicUploadFee > nodeBalance) {
-            console.log(`Bundlr Node balance insufficient to cover upload.  Funding node from wallet ${bundlr.address} \n`)
-            const fundAmount = await fundBundlrNode(folderSize)
-            console.log(`Funded Bundlr node with ${fundAmount} ${config.env.currency}. Uploading folder to permaweb now...`)
-        }
-
-        executeFolderUploadToPermaweb(folder, tags)
-
+        await executeFolderUploadToPermaweb(path, size, tags)
     }
-
 
     // await getFileSize()
     // await getNodeBalance()
     // await getUploadCostEstimate()
-    // await fundBundlrNode()
+    //await fundBundlrNode(fundAmount)
     // await uploadData()
-    // await uploadFile()
-    // await uploadFolder()
+    await uploadFile()
+    //await uploadFolder()
 }

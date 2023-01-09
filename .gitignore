@@ -1,5 +1,5 @@
 *.DS_Store
-
+_test.js
 *-id.txt
 *-manifest.csv
 *-manifest.json

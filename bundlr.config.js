@@ -74,6 +74,6 @@ export default {
         contentType: "text/html"
     },
     fund: {
-        amount: 4_333_222
+        amount: 4_442_242
     }
 }
